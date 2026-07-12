@@ -5,6 +5,10 @@ desk:
   # "live" is refused at startup until Gate C is passed and a live execution
   # adapter exists. Override per-run with the DESK_MODE env var.
   mode: dry                    # dry | live
+  # Which network live mode trades. "mainnet" is additionally hard-blocked
+  # in code (hyperliquid_exec.py) until Gate C sign-off — flipping this
+  # line alone cannot reach real capital.
+  network: testnet             # testnet | mainnet
   venue: hyperliquid
   universe: [BTC, ETH]
   max_effective_leverage: 1

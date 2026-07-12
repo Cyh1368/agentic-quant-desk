@@ -94,16 +94,25 @@ def main() -> int:
     if mode in ("dry", "shadow"):
         mode = "dry"
     elif mode == "live":
-        msg = ("desk.mode=live REFUSED: no live execution adapter or venue "
-               "credential exists (Gate C not passed: venue admission "
-               "checklist, 30 days clean shadow). Running nothing.")
-        print(msg)
-        discord.send(msg, severity="p1")
-        return 2
+        network = cfg["desk"].get("network", "testnet")
+        if network != "testnet":
+            msg = ("desk.mode=live network=mainnet REFUSED: mainnet unlock "
+                   "is a reviewed code change after Gate C sign-off "
+                   "(eligibility call + kill drill + 30d clean record).")
+            print(msg)
+            discord.send(msg, severity="p1")
+            return 2
     else:
         print(f"unknown desk.mode {mode!r}; expected dry|live")
         return 2
-    log(f"decision cycle start {now:%Y-%m-%d %H:%M} UTC — mode={mode}")
+    executor = None
+    if mode == "live":
+        from quantdesk.execution.hyperliquid_exec import HyperliquidTestnetExecutor
+        executor = HyperliquidTestnetExecutor()
+        log(f"decision cycle start {now:%Y-%m-%d %H:%M} UTC — mode=LIVE "
+            f"(network=testnet, account {executor.address[:8]}…)")
+    else:
+        log(f"decision cycle start {now:%Y-%m-%d %H:%M} UTC — mode={mode}")
 
     data_dir = REPO_ROOT / cfg["storage"]["ledger_path"]
     data_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -262,6 +271,52 @@ def main() -> int:
         )
         coid = client_order_id(intent.intent_id)
         store.insert_order(coid, intent.intent_id, intent.instrument_id, "SUBMITTING", intent.model_dump(mode="json"))
+        if executor is not None:
+            # LIVE path: idempotent venue submission + mandatory stop attach.
+            res = executor.market_order(
+                intent.instrument_id, intent.side == "buy",
+                float(exec_intent.quantity), intent.intent_id,
+            )
+            if not res.ok or res.filled_size == 0:
+                store.update_order_state(coid, "REJECTED")
+                log(f"LIVE order not filled ({res.status}) {intent.instrument_id}", severity="p1")
+                continue
+            store.update_order_state(coid, "FILLED")
+            if intent.stop_price is not None and intent.effect in ("open", "increase"):
+                from hyperliquid.utils.types import Cloid
+                from quantdesk.execution.hyperliquid_exec import _cloid_hex
+                # Venue px rule: 5 sig figs / szDecimals-bounded decimals
+                # (drill finding: violations rejected as Invalid TP/SL price).
+                from quantdesk.execution.hyperliquid_exec import round_price_for_venue
+                stop_px = round_price_for_venue(
+                    float(intent.stop_price),
+                    executor.sz_decimals[intent.instrument_id])
+                stop_resp = executor.exchange.order(
+                    intent.instrument_id, intent.side != "buy",
+                    float(res.filled_size), stop_px,
+                    {"trigger": {"triggerPx": stop_px,
+                                 "isMarket": True, "tpsl": "sl"}},
+                    reduce_only=True, cloid=Cloid(_cloid_hex(uuid4())),
+                )
+                stop_statuses = (stop_resp.get("response", {})
+                                 .get("data", {}).get("statuses", []))
+                stop_failed = (stop_resp.get("status") != "ok"
+                               or any("error" in st for st in stop_statuses))
+                if stop_failed:
+                    log(f"P0: stop attach FAILED for {intent.instrument_id}: "
+                        f"{stop_statuses or stop_resp}; flattening", severity="p0")
+                    executor.close_position(intent.instrument_id, uuid4())
+                    continue
+            signed = res.filled_size if intent.side == "buy" else -res.filled_size
+            prev = store.get_shadow_position(intent.instrument_id)
+            prev_qty = Decimal(str(prev["quantity"])) if prev else Decimal("0")
+            store.record_fill(res.cloid, coid, intent.instrument_id,
+                              res.filled_size, res.avg_price, {"live": True})
+            store.upsert_shadow_position(intent.instrument_id, prev_qty + signed, res.avg_price)
+            fills.append(res)
+            log(f"LIVE fill: {intent.side} {res.filled_size} {intent.instrument_id} "
+                f"@ {res.avg_price} (stop {intent.stop_price})")
+            continue
         fill = simulate_fill(exec_intent, book, now)
         if fill is None:
             store.update_order_state(coid, "REJECTED")
@@ -295,6 +350,29 @@ def main() -> int:
         )
         for i in intents if i.stop_price is not None
     ]
+    if executor is not None:
+        # LIVE: reconcile ledger vs venue truth; protection from venue orders.
+        venue = executor.balances()
+        for vp in venue["positions"]:
+            ledg = store.get_shadow_position(vp["coin"])
+            lq = Decimal(str(ledg["quantity"])) if ledg else Decimal("0")
+            if lq != vp["size"]:
+                log(f"P0 RECONCILIATION: {vp['coin']} ledger={lq} venue={vp['size']}", severity="p0")
+        triggers = [o for o in executor.info.frontend_open_orders(executor.address)
+                    if o.get("isTrigger")]
+        protective = [
+            ProtectiveOrder(instrument_id=o["coin"], order_type="stop_market",
+                            side=o["side"] if o.get("side") in ("buy", "sell")
+                            else ("sell" if o.get("side") == "A" else "buy"),
+                            quantity=Decimal(str(o["sz"])),
+                            stop_price=Decimal(str(o.get("triggerPx", 0))))
+            for o in triggers
+        ]
+        open_positions = [
+            Position(instrument_id=vp["coin"], quantity=vp["size"],
+                     entry_price=Decimal(str(vp.get("entry_px") or 0)))
+            for vp in venue["positions"] if vp["size"] != 0
+        ]
     unprotected = find_unprotected_positions(open_positions, protective)
     for p in unprotected:
         log(f"P0 WATCHDOG: unprotected position {p.instrument_id} qty {p.quantity}", severity="p0")

@@ -39,6 +39,13 @@ class ExecResult:
     raw: Any
 
 
+def round_price_for_venue(px: float, sz_decimals: int) -> float:
+    """Hyperliquid px rule: max 5 significant figures AND max
+    (6 - szDecimals) decimal places. DRILL FINDING (2026-07-12): venue
+    rejects TP/SL prices violating this with 'Invalid TP/SL price'."""
+    return round(float(f"{px:.5g}"), 6 - sz_decimals)
+
+
 def _cloid_hex(intent_id) -> str:
     """Hyperliquid cloid must be a 16-byte hex string (0x + 32 hex chars)."""
     digest = client_order_id(intent_id).removeprefix("qd-")  # 20 hex chars
@@ -62,6 +69,8 @@ class HyperliquidTestnetExecutor:
         main = os.environ.get("HYPERLIQUID_MAIN_WALLET_ADDRESS", "").strip()
         self.address = main or self._wallet.address
         self.info = Info(TESTNET_API_URL, skip_ws=True)
+        meta = self.info.meta()
+        self.sz_decimals = {a["name"]: a["szDecimals"] for a in meta["universe"]}
         self.exchange = Exchange(
             self._wallet, TESTNET_API_URL,
             account_address=self.address,
@@ -91,11 +100,44 @@ class HyperliquidTestnetExecutor:
         return self.info.open_orders(self.address)
 
     # -- orders -----------------------------------------------------------
-    def market_order(self, coin: str, is_buy: bool, size: float,
-                     intent_id, slippage: float = 0.01) -> ExecResult:
-        """IOC market order with deterministic cloid. Small sizes only."""
+    def cloid_already_submitted(self, cloid: str) -> dict | None:
+        """Venue-truth pre-submission check.
+
+        DRILL FINDING (2026-07-12, testnet): Hyperliquid does NOT enforce
+        cloid uniqueness — the venue accepts two orders with the same
+        cloid. Idempotency therefore lives HERE: every submission path
+        must call this first and skip the submit when the cloid is
+        already known to the venue (open, filled, or canceled).
+        Returns the venue's order record, or None if unknown.
+        """
+        st = self.order_status_by_cloid(cloid)
+        if st.get("status") == "order":
+            return st.get("order")
+        return None
+
+    def submit_limit_idempotent(self, coin: str, is_buy: bool, size: float,
+                                px: float, intent_id,
+                                tif: str = "Gtc") -> ExecResult:
+        """GTC limit order; resubmitting the same intent is a no-op."""
         from hyperliquid.utils.types import Cloid
         cloid = _cloid_hex(intent_id)
+        existing = self.cloid_already_submitted(cloid)
+        if existing is not None:
+            return ExecResult(True, "already_submitted", cloid,
+                              Decimal("0"), None, existing)
+        resp = self.exchange.order(coin, is_buy, size, px,
+                                   {"limit": {"tif": tif}}, cloid=Cloid(cloid))
+        return self._parse_response(resp, cloid)
+
+    def market_order(self, coin: str, is_buy: bool, size: float,
+                     intent_id, slippage: float = 0.01) -> ExecResult:
+        """IOC market order with deterministic cloid; idempotent on retry."""
+        from hyperliquid.utils.types import Cloid
+        cloid = _cloid_hex(intent_id)
+        existing = self.cloid_already_submitted(cloid)
+        if existing is not None:
+            return ExecResult(True, "already_submitted", cloid,
+                              Decimal("0"), None, existing)
         resp = self.exchange.market_open(
             coin, is_buy, size, None, slippage, cloid=Cloid(cloid)
         )
