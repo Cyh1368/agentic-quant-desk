@@ -300,6 +300,22 @@ def main() -> int:
         log(f"P0 WATCHDOG: unprotected position {p.instrument_id} qty {p.quantity}", severity="p0")
 
     halt = halts.current_state(store)
+    # Explicit per-asset position decision, every cycle.
+    intents_by_asset = {}
+    for i in intents:
+        intents_by_asset.setdefault(i.instrument_id, []).append(i)
+    for coin in universe:
+        pos_notional = current_notional[coin]
+        coin_intents = intents_by_asset.get(coin, [])
+        if coin_intents:
+            desc = "; ".join(f"{i.side} {i.quantity} ({i.effect})" for i in coin_intents)
+            trail.append(f"POSITION DECISION {coin}: {desc} | current ${pos_notional:.2f}")
+        else:
+            actions = {fc.advisor_id: fc.action for fc in forecasts if fc.instrument_id == coin}
+            trail.append(
+                f"POSITION DECISION {coin}: hold (target flat, no trade) | "
+                f"current ${pos_notional:.2f} | advisor views: {actions}"
+            )
     for fc in forecasts:
         trail.append(
             f"forecast {fc.advisor_id} {fc.instrument_id}: {fc.action} "
