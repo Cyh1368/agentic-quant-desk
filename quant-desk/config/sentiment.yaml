@@ -1,0 +1,75 @@
+# Twitter/X sentiment pipeline configuration (twitter-sentiment-plan-v2.md).
+# RESEARCH ONLY: nothing in this subsystem can influence orders (§8).
+enabled: true
+cadence_minutes: 240   # 4h cadence per user; aligned with desk decision times
+
+provider:
+  name: twitterapi_io
+  key_env: TWITTERAPI_IO_KEY
+
+budget:
+  max_requests_per_day: 400
+  max_tweets_per_cycle: 400
+  max_monthly_usd: 15          # desk total budget is $50/mo; LLM cap is $25
+
+assets:
+  BTC:
+    cashtag_query: '($BTC OR bitcoin) lang:en -is:retweet'
+    min_author_followers: 150
+  ETH:
+    cashtag_query: '($ETH OR ethereum) lang:en -is:retweet'
+    min_author_followers: 150
+
+curated_authors: []            # FILL IN: ~30-60 handles, each {handle, category}
+# category: analyst | fund | exchange_status | protocol_status | macro_news | regulator
+
+global_filters:
+  languages: [en]
+  exclude_retweets: true
+  exclude_replies: false
+  dedupe_lookback_hours: 48
+
+spam:
+  min_author_followers: 150
+  min_account_age_days: 30
+  max_tweets_per_author_per_window: 5
+
+scorer:
+  model_repo: cardiffnlp/twitter-roberta-base-sentiment-latest
+  model_revision: 3216a57f2a0d9c45a2e6c20157c20c49fb4bf9c7   # pinned 2026-07-12
+  model_local_dir: ~/models/twitter-roberta-base-sentiment-latest  # used if present
+  max_sequence_length: 512
+  device: cpu
+
+features:
+  baseline_window_days: 28
+  baseline_min_observations: 14
+  spike_volume_z: 3.0
+  spike_authors_z: 2.0
+  data_health_null_threshold: 0.8
+  min_tweets_per_window: 5
+  min_authors_per_window: 3
+
+snapshot_samples:
+  max_samples: 5
+  max_per_author: 1
+  include_samples: true        # per-decision flag, logged in provenance
+
+storage:
+  tweet_store_path: data/sentiment.sqlite   # separate store; ledger stays single-writer
+  raw_landing_source_id: twitterapi_io
+
+# Fail-closed terms gate: the source refuses to enable while any required
+# item below is null (plan §4).
+terms_review:
+  reviewed_at: null
+  reviewed_by: null
+  provider_terms_url: https://twitterapi.io/terms
+  platform_terms_url: https://x.com/en/tos
+  permitted_storage: null
+  raw_retention_days: null
+  deletion_sync_required: null
+  redistribution_allowed: null
+  commercial_use_allowed: null
+  model_training_allowed: null
+  notes: "Review provider + platform terms before enabling live fetch."

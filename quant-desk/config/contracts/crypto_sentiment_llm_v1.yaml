@@ -1,0 +1,25 @@
+# Pre-registered Advisor Research Contract (sentiment plan §9).
+# Registered 2026-07-12, BEFORE prospective data collection.
+advisor_id: crypto_sentiment_llm_v1
+forecast_target: next_24h_excess_log_return
+universe: [BTC, ETH]
+decision_times_utc: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
+horizon: 24h
+benchmark: sent_zscore_contrarian_baseline_v1   # frozen before data collection
+abstention_allowed: true
+primary_metric:
+  name: spearman_ic
+  forecast: expected_excess_return_bps
+  outcome: next_24h_excess_log_return
+  uncertainty: stationary_block_bootstrap
+secondary_metrics: [brier_score, log_loss, calibration_slope, calibration_intercept,
+                    balanced_accuracy, net_pnl_after_costs, turnover, coverage]
+minimum_calendar_days: 120
+minimum_decisions: 500
+minimum_non_overlapping_outcomes: 100
+overlap_adjustment: stationary_block_bootstrap_and_HAC
+promotion_rule: pre_registered_thresholds_only
+interim_analysis_at: [200]                      # look, don't promote
+gate_d_blockers:
+  - scorer_validation_report_complete           # §6 human-labeled confusion/calibration
+  - incremental_value_comparisons_run           # §9 five-way comparison

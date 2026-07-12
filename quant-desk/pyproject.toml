@@ -16,6 +16,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "ruff>=0.4"]
+# Local sentiment scorer (heavy; CPU inference). Install with pip install -e '.[sentiment]'
+sentiment = ["transformers>=4.40", "torch>=2.2", "numpy>=1.26"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
