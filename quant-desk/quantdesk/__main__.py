@@ -300,6 +300,28 @@ def main() -> int:
         log(f"P0 WATCHDOG: unprotected position {p.instrument_id} qty {p.quantity}", severity="p0")
 
     halt = halts.current_state(store)
+
+    # --- sentiment research summary (report-only: research forecasts are
+    # structurally isolated from orders; this is informational context) ----
+    try:
+        import sqlite3 as _sq
+        _rc = _sq.connect(REPO_ROOT / "data" / "research.sqlite")
+        _rc.row_factory = _sq.Row
+        import json as _json
+        for _r in _rc.execute(
+            "SELECT payload FROM research_forecasts ORDER BY rowid DESC LIMIT 4"
+        ):
+            _d = _json.loads(_r["payload"])
+            trail.append(
+                f"sentiment research {_d['advisor_id']} {_d['instrument_id']}: "
+                f"{'abstain' if _d['abstain'] else _d['direction']}"
+                + (f" (p+={_d['probability_positive']})" if _d.get('probability_positive') else "")
+                + " [research-only, no order influence]"
+            )
+        _rc.close()
+    except Exception:
+        trail.append("sentiment research: unavailable this cycle")
+
     # Explicit per-asset position decision, every cycle.
     intents_by_asset = {}
     for i in intents:
