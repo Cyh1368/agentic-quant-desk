@@ -57,9 +57,15 @@ class HyperliquidTestnetExecutor:
         from hyperliquid.info import Info
 
         self._wallet = Account.from_key(key)
-        self.address = self._wallet.address
+        # Agent/API wallets sign on behalf of the main account; balances and
+        # positions live at the main address.
+        main = os.environ.get("HYPERLIQUID_MAIN_WALLET_ADDRESS", "").strip()
+        self.address = main or self._wallet.address
         self.info = Info(TESTNET_API_URL, skip_ws=True)
-        self.exchange = Exchange(self._wallet, TESTNET_API_URL)
+        self.exchange = Exchange(
+            self._wallet, TESTNET_API_URL,
+            account_address=self.address,
+        )
 
     # -- account state ----------------------------------------------------
     def balances(self) -> dict:
@@ -103,7 +109,8 @@ class HyperliquidTestnetExecutor:
 
     def order_status_by_cloid(self, cloid: str) -> dict:
         """Venue-truth lookup for UNKNOWN recovery: query by client order id."""
-        return self.info.query_order_by_cloid(self.address, cloid)
+        from hyperliquid.utils.types import Cloid
+        return self.info.query_order_by_cloid(self.address, Cloid(cloid))
 
     @staticmethod
     def _parse_response(resp: Any, cloid: str) -> ExecResult:
