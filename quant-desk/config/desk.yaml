@@ -1,0 +1,71 @@
+# Quant desk v1 configuration (plan §2, §9, §12).
+# v1 mode is SHADOW ONLY: no venue order submission path exists.
+desk:
+  # THE dry/live switch. "dry" = shadow trading (no orders leave the box).
+  # "live" is refused at startup until Gate C is passed and a live execution
+  # adapter exists. Override per-run with the DESK_MODE env var.
+  mode: dry                    # dry | live
+  venue: hyperliquid
+  universe: [BTC, ETH]
+  max_effective_leverage: 1
+  decision_times_utc: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
+
+account:
+  max_gross_exposure_pct: 30
+  max_net_directional_pct: 20
+  max_single_position_pct: 10
+  max_leverage_per_position: 1
+  daily_loss_soft_halt_pct: 0.75
+  daily_loss_hard_halt_pct: 1.25
+  weekly_loss_hard_halt_pct: 2.5
+  max_drawdown_kill_pct: 4
+  human_restart_required_after_hard_halt: true
+  shadow_equity_usd: "1000"    # notional book for shadow accounting
+
+orders:
+  max_order_size_pct_equity: 5
+  max_orders_per_hour: 4
+  max_cancel_replace_attempts: 2
+  mandatory_protective_exit: true
+  min_stop_distance_atr: 0.5
+  max_stop_distance_atr: 3.0
+  default_max_slippage_bps: 25
+  default_max_fee_bps: 10
+
+process:
+  stale_data_max_minutes: 15
+  cross_source_divergence_bps: 50       # venue mark vs reference beyond this -> degraded mode
+  cross_source_divergence_degraded_mode: true
+  heartbeat_alert_minutes: 10
+
+portfolio:
+  target_annual_vol_pct: 10
+  crash_correlation_override: 0.95      # BTC/ETH treated near-perfectly correlated for caps
+  min_trade_cost_multiple: 1.0          # suppress changes smaller than round-trip cost
+  reliability_shrinkage: 0.5
+
+llm:
+  provider: openrouter                       # user has OpenRouter keys
+  advisor_model: anthropic/claude-haiku-4.5  # OpenRouter model id; cheap tier
+  critic_model: anthropic/claude-sonnet-5    # different tier than advisors
+  critic_enabled: false                       # v1 shadow: no exposure-increasing orders exist
+  timeout_seconds: 15
+  failure_policy: reject_new_exposure
+  monthly_budget_usd: 25                     # hard stop: advisor calls skipped when exceeded
+  max_cost_per_decision_usd: 0.05
+
+advisors:
+  ts_momentum_baseline:
+    type: deterministic
+    enabled: true
+  crypto_trend_llm_v1:
+    type: llm
+    enabled: true
+    status: shadow            # shadow | active_with_size_multiplier | demoted
+    research_contract: config/contracts/crypto_trend_llm_v1.yaml
+
+storage:
+  ledger_path: data/ledger.sqlite
+  raw_landing_dir: data/raw
+  parquet_dir: data/parquet
+  snapshot_dir: data/snapshots

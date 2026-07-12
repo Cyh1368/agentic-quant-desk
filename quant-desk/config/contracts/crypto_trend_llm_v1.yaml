@@ -1,0 +1,23 @@
+# Pre-registered Advisor Research Contract (plan §6).
+# Registered 2026-07-12, BEFORE any prospective data was collected.
+advisor_id: crypto_trend_llm_v1
+forecast_target: next_24h_excess_return_sign
+universe: [BTC, ETH]
+decision_times_utc: ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00"]
+horizon: 24h
+benchmark: ts_momentum_baseline
+abstention_allowed: true
+primary_metric: net_information_coefficient
+secondary_metrics: [brier_score, calibration_error, net_pnl_after_costs, turnover, maximum_drawdown]
+minimum_sample_size: 200
+promotion_rule: pre_registered_thresholds_only
+promotion_thresholds:
+  net_information_coefficient_min: 0.03
+  brier_score_max: 0.24
+  calibration_error_max: 0.10
+  must_beat_baselines: [always_flat, buy_and_hold, random_same_frequency, ts_momentum_baseline]
+  net_of_costs: true
+demotion_thresholds:
+  rolling_window: 100
+  brier_score_max: 0.27
+  action_on_breach: shadow
