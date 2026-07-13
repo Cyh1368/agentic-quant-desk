@@ -65,8 +65,21 @@ advisors:
   crypto_trend_llm_v1:
     type: llm
     enabled: true
-    status: shadow            # shadow | active_with_size_multiplier | demoted
+    status: provisional       # shadow | provisional | active_with_size_multiplier | demoted
     research_contract: config/contracts/crypto_trend_llm_v1.yaml
+    # Owner decision 2026-07-13: trade on this advisor at reduced weight while
+    # the prospective track record accumulates (testnet only). The contract's
+    # minimum_sample_size still governs promotion to full weight.
+    provisional_reliability: 0.3
+  crypto_sentiment_llm_v1:
+    type: llm
+    enabled: true
+    status: provisional
+    research_contract: config/contracts/crypto_sentiment_llm_v1.yaml
+    provisional_reliability: 0.3
+    # Sentiment runs as a separate 4h process writing data/research.sqlite;
+    # the desk cycle consumes its freshest forecast if younger than this.
+    max_staleness_minutes: 300
 
 storage:
   ledger_path: data/ledger.sqlite

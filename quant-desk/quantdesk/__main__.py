@@ -1,16 +1,20 @@
 """One full shadow decision cycle: data -> advisors -> portfolio -> risk ->
 shadow execution -> ledger.  Run with ``python -m quantdesk``.
 
-Authority rule (plan v2): no LLM sits in the mandatory path.  The LLM
-advisor runs shadow-only (reliability weight 0 in the portfolio engine);
-only the deterministic baseline can move the shadow book.
+Authority rule (amended by owner decision 2026-07-13): LLM advisors with
+status "provisional" in config trade at a reduced, config-set reliability
+(further cut by reliability_shrinkage) while their prospective track record
+accumulates. Full weight still requires passing the research contract. The
+mandatory risk gate remains deterministic and LLM-free.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -18,6 +22,7 @@ from quantdesk.advisors.baseline import ts_momentum_baseline
 from quantdesk.common.alerts import DiscordNotifier
 from quantdesk.advisors.llm_trend import LlmTrendAdvisorConfig, run_crypto_trend_llm_v1
 from quantdesk.common.config import REPO_ROOT, load_config
+from quantdesk.common.schemas import ForecastSignal
 from quantdesk.data.hyperliquid import HyperliquidClient
 from quantdesk.data.raw_store import RawStore
 from quantdesk.data.reference import ReferencePriceClient, cross_source_check
@@ -53,6 +58,101 @@ def _baseline_track_record() -> AdvisorTrackRecord:
         calibration_buckets=BASELINE_CALIBRATION_BUCKETS,
         reliability=1.0,
     )
+
+
+def _provisional_track_record(advisor_id: str, reliability: float) -> AdvisorTrackRecord:
+    """Track record for an advisor trading under provisional status.
+
+    sample_count == minimum so the calibration gate passes; reliability comes
+    from config (owner-set, deliberately small) rather than a measured record.
+    The baseline calibration buckets stand in until the advisor has its own.
+    """
+    return AdvisorTrackRecord(
+        advisor_id=advisor_id,
+        prospective_sample_count=1,
+        contract_minimum_sample_size=1,
+        calibration_buckets=BASELINE_CALIBRATION_BUCKETS,
+        reliability=reliability,
+    )
+
+
+SENTIMENT_ADVISOR_ID = "crypto_sentiment_llm_v1"
+
+
+def _load_sentiment_forecasts(
+    universe: list[str],
+    venue: str,
+    now: datetime,
+    snapshot_id: UUID,
+    max_staleness_minutes: int,
+) -> tuple[list[ForecastSignal], list[str]]:
+    """Freshest sentiment research forecast per instrument, promoted to a
+    ForecastSignal for the portfolio engine (owner decision 2026-07-13).
+
+    Sentiment is produced by the separate quantdesk.sentiment_cycle process
+    into data/research.sqlite. Stale or abstaining forecasts become no signal
+    at all (not a flat vote) so they never dilute or veto other advisors.
+    Returns (signals, trail_notes).
+    """
+    signals: list[ForecastSignal] = []
+    notes: list[str] = []
+    db_path = REPO_ROOT / "data" / "research.sqlite"
+    if not db_path.exists():
+        return signals, [f"sentiment: {db_path.name} missing — no sentiment input this cycle"]
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        for coin in universe:
+            row = conn.execute(
+                "SELECT payload, horizon_seconds FROM research_forecasts "
+                "WHERE advisor_id = ? AND instrument_id = ? "
+                "ORDER BY generated_at DESC LIMIT 1",
+                (SENTIMENT_ADVISOR_ID, coin),
+            ).fetchone()
+            if row is None:
+                notes.append(f"sentiment {coin}: no forecast on record")
+                continue
+            d = json.loads(row["payload"])
+            generated_at = datetime.fromisoformat(d["generated_at"])
+            if generated_at.tzinfo is None:
+                generated_at = generated_at.replace(tzinfo=timezone.utc)
+            age_min = (now - generated_at).total_seconds() / 60
+            if age_min > max_staleness_minutes:
+                notes.append(f"sentiment {coin}: stale ({age_min:.0f}m old) — ignored")
+                continue
+            if d.get("abstain") or d.get("direction") not in ("long", "short"):
+                notes.append(f"sentiment {coin}: abstain/flat — no signal")
+                continue
+            prob = d.get("probability_positive")
+            excess = d.get("expected_excess_return_bps")
+            if prob is None or excess is None:
+                notes.append(f"sentiment {coin}: missing p+/excess — ignored")
+                continue
+            confidence = float(d.get("confidence") or 0.0)
+            direction = d["direction"]
+            signals.append(ForecastSignal(
+                signal_id=uuid4(),
+                advisor_id=SENTIMENT_ADVISOR_ID,
+                advisor_version=str(d.get("advisor_version", "unknown")),
+                generated_at=generated_at,
+                data_cutoff_at=generated_at,
+                expires_at=now + timedelta(hours=4),
+                venue=venue,
+                instrument_id=coin,
+                forecast_target="next_24h_excess_return_sign",
+                horizon=timedelta(seconds=int(row["horizon_seconds"])),
+                action=direction,
+                raw_score=confidence if direction == "long" else -confidence,
+                calibrated_probability_positive=float(prob),
+                expected_excess_return_bps=float(excess),
+                evidence_feature_ids=list(d.get("evidence_feature_ids") or []),
+                thesis=f"twitter sentiment ({age_min:.0f}m old): {direction} p+={prob}",
+                snapshot_id=snapshot_id,
+            ))
+            notes.append(f"sentiment {coin}: {direction} p+={prob} ({age_min:.0f}m old) — in decision")
+    finally:
+        conn.close()
+    return signals, notes
 
 
 async def _fetch_market_data(cfg: dict, raw_store: RawStore, universe: list[str]):
@@ -206,11 +306,29 @@ def main() -> int:
     else:
         log(f"NOTE: {key_env} not set — LLM advisor skipped this cycle.")
 
+    advisors_cfg = cfg.get("advisors", {})
+    sent_cfg = advisors_cfg.get(SENTIMENT_ADVISOR_ID, {})
+    if sent_cfg.get("enabled"):
+        sent_signals, sent_notes = _load_sentiment_forecasts(
+            universe, venue, now, snapshot_id,
+            max_staleness_minutes=int(sent_cfg.get("max_staleness_minutes", 300)),
+        )
+        forecasts += sent_signals
+        for n in sent_notes:
+            log(n)
+
     for fc in forecasts:
         store.insert_forecast(fc)
 
-    # --- portfolio engine (LLM advisor has no track record -> weight 0)
+    # --- portfolio engine. Baseline trades at full measured weight;
+    # advisors marked status=provisional in config trade at their owner-set
+    # provisional_reliability (see module docstring).
     track_records = {"ts_momentum_baseline": _baseline_track_record()}
+    for adv_id, adv in advisors_cfg.items():
+        if adv.get("status") == "provisional" and adv.get("enabled"):
+            track_records[adv_id] = _provisional_track_record(
+                adv_id, float(adv.get("provisional_reliability", 0.0))
+            )
     acct, orders_cfg, pf = cfg["account"], cfg["orders"], cfg["portfolio"]
     equity = Decimal(str(acct["shadow_equity_usd"]))
     decision_id = uuid4()
@@ -379,26 +497,23 @@ def main() -> int:
 
     halt = halts.current_state(store)
 
-    # --- sentiment research summary (report-only: research forecasts are
-    # structurally isolated from orders; this is informational context) ----
+    # --- recent research forecasts (raw feed context; whether sentiment
+    # actually entered this decision is logged above by the loader) --------
     try:
-        import sqlite3 as _sq
-        _rc = _sq.connect(REPO_ROOT / "data" / "research.sqlite")
-        _rc.row_factory = _sq.Row
-        import json as _json
+        _rc = sqlite3.connect(REPO_ROOT / "data" / "research.sqlite")
+        _rc.row_factory = sqlite3.Row
         for _r in _rc.execute(
             "SELECT payload FROM research_forecasts ORDER BY rowid DESC LIMIT 4"
         ):
-            _d = _json.loads(_r["payload"])
+            _d = json.loads(_r["payload"])
             trail.append(
-                f"sentiment research {_d['advisor_id']} {_d['instrument_id']}: "
+                f"research feed {_d['advisor_id']} {_d['instrument_id']}: "
                 f"{'abstain' if _d['abstain'] else _d['direction']}"
                 + (f" (p+={_d['probability_positive']})" if _d.get('probability_positive') else "")
-                + " [research-only, no order influence]"
             )
         _rc.close()
     except Exception:
-        trail.append("sentiment research: unavailable this cycle")
+        trail.append("research feed: unavailable this cycle")
 
     # Explicit per-asset position decision, every cycle.
     intents_by_asset = {}
