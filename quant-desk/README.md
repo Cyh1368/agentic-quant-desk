@@ -47,7 +47,17 @@ pytest
 ```bash
 python -m quantdesk            # one full decision cycle (dry or live per config/env)
 python -m quantdesk.data       # data-pipeline smoke fetch
+python -m quantdesk.dashboard  # read-only web dashboard on http://localhost:8420
 ```
+
+## Dashboard
+`quantdesk/dashboard/` serves a read-only web UI (Flask, sqlite opened with
+`mode=ro`) over the ledgers and snapshots: latest advisor signals, positions,
+intents / risk verdicts / orders / fills, LLM spend, tweet-level sentiment with
+links to the original posts on x.com, and 30-day history (hourly sentiment
+chart, forecast/order/fill logs). Runs under PM2 as `qd-dashboard` (port 8420,
+localhost-bound — reach it from another machine with
+`ssh -L 8420:localhost:8420 <desk-host>`).
 
 ## Cost budget ($50/mo total)
 - LLM: hard-capped at $25/mo in `config/desk.yaml` (`llm.monthly_budget_usd`);

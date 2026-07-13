@@ -291,3 +291,43 @@ def test_single_target_rows_are_not_excluded_from_means():
     kept = _non_ambiguous(rows)
     assert len(kept) == 2
     assert all(r["target_ambiguity"] != "multi_asset" for r in kept)
+
+
+def test_weighted_sent_mean_tilts_toward_high_follower_authors():
+    import math
+
+    query_windows = [
+        {
+            "window_start": NOW - timedelta(hours=24),
+            "window_end": NOW,
+            "complete": True,
+            "time_coverage": 1.0,
+            "fetch_success_rate": 1.0,
+            "completeness": 1.0,
+            "scoring_success_rate": 1.0,
+            "schema_valid_rate": 1.0,
+        }
+    ]
+    rows = [
+        make_row(tweet_id="t1", author_id="whale", sentiment=0.8, author_followers=1_000_000,
+                 event_time=NOW - timedelta(minutes=10)),
+        make_row(tweet_id="t2", author_id="minnow1", sentiment=-0.4, author_followers=10,
+                 event_time=NOW - timedelta(minutes=15)),
+        make_row(tweet_id="t3", author_id="minnow2", sentiment=-0.4, author_followers=10,
+                 event_time=NOW - timedelta(minutes=20)),
+    ]
+
+    features = compute_sentiment_features(ASSET, rows, query_windows, NOW, DEFAULT_CONFIG, baseline=None)
+
+    # Unweighted median of author medians: median(0.8, -0.4, -0.4) = -0.4.
+    assert features[fid("sent_mean_1h_broad")] == pytest.approx(-0.4)
+    w_whale = 1 + math.log1p(1_000_000)
+    w_minnow = 1 + math.log1p(10)
+    expected = (0.8 * w_whale + -0.4 * w_minnow * 2) / (w_whale + 2 * w_minnow)
+    weighted = features[fid("sent_mean_1h_broad_weighted")]
+    assert weighted == pytest.approx(expected)
+    assert weighted > features[fid("sent_mean_1h_broad")]
+    # Weighted variants null out alongside the unweighted ones on low health.
+    unhealthy = [dict(query_windows[0], scoring_success_rate=0.2)]
+    nulled = compute_sentiment_features(ASSET, rows, unhealthy, NOW, DEFAULT_CONFIG, baseline=None)
+    assert nulled[fid("sent_mean_1h_broad_weighted")] is None

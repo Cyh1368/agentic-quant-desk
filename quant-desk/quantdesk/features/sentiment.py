@@ -108,6 +108,38 @@ def _population_mean(rows: Sequence[dict]) -> float | None:
     return median(author_medians.values())
 
 
+def _author_log_follower_weights(rows: Sequence[dict]) -> dict[str, float]:
+    """Per-author weight = 1 + log1p(max followers observed in window).
+
+    The +1 floor keeps unknown/zero-follower authors in the aggregate; log
+    compression keeps a 1M-follower account at ~3x a 1k-follower one rather
+    than 1000x, limiting how much reach can buy.
+    """
+    followers: dict[str, float] = {}
+    for r in rows:
+        f = r.get("author_followers")
+        if f is None:
+            f = 0
+        prev = followers.get(r["author_id"], 0.0)
+        followers[r["author_id"]] = max(prev, float(f))
+    return {a: 1.0 + math.log1p(max(f, 0.0)) for a, f in followers.items()}
+
+
+def _population_weighted_mean(rows: Sequence[dict]) -> float | None:
+    """Shadow variant of _population_mean: per-author median (same flood
+    resistance), then follower-log-weighted mean across authors instead of
+    the median. Research-only until prospective scoring says otherwise."""
+    eligible = _scored(_non_ambiguous(rows))
+    author_medians = _author_median_sentiment(eligible)
+    if not author_medians:
+        return None
+    weights = _author_log_follower_weights(eligible)
+    total = sum(weights[a] for a in author_medians)
+    if total <= 0:
+        return None
+    return sum(m * weights[a] for a, m in author_medians.items()) / total
+
+
 def _meets_minimums(rows: Sequence[dict], config: dict) -> bool:
     features_cfg = config.get("features", {})
     min_tweets = features_cfg.get("min_tweets_per_window", 1)
@@ -324,6 +356,9 @@ def compute_sentiment_features(
         pop_rows_24h = [r for r in rows_24h if r.get("source_class") == population]
         out[fid(f"sent_mean_1h_{population}")] = _population_mean(pop_rows_1h)
         out[fid(f"sent_mean_24h_{population}")] = _population_mean(pop_rows_24h)
+        # Shadow follower-weighted variants (not consumed by any advisor yet).
+        out[fid(f"sent_mean_1h_{population}_weighted")] = _population_weighted_mean(pop_rows_1h)
+        out[fid(f"sent_mean_24h_{population}_weighted")] = _population_weighted_mean(pop_rows_24h)
 
     # sent_dispersion_1h: population-combined dispersion of per-author medians
     combined_author_medians = _author_median_sentiment(_scored(_non_ambiguous(rows_1h)))
@@ -396,6 +431,10 @@ _ALL_SENTIMENT_FEATURE_NAMES = (
     "sent_mean_1h_curated",
     "sent_mean_24h_broad",
     "sent_mean_24h_curated",
+    "sent_mean_1h_broad_weighted",
+    "sent_mean_1h_curated_weighted",
+    "sent_mean_24h_broad_weighted",
+    "sent_mean_24h_curated_weighted",
     "sent_dispersion_1h",
     "sent_delta_6h",
     "positive_fraction",

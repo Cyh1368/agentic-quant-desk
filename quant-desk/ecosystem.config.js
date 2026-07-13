@@ -13,5 +13,16 @@ module.exports = {
       error_file: "logs/sentiment-cycle.err",
       time: true,
     },
+    {
+      name: "qd-dashboard",
+      script: ".venv/bin/python",
+      args: "-m quantdesk.dashboard",
+      cwd: __dirname,
+      autorestart: true,
+      env: { QD_DASHBOARD_PORT: "8420", QD_DASHBOARD_HOST: "127.0.0.1" },
+      out_file: "logs/dashboard.log",
+      error_file: "logs/dashboard.err",
+      time: true,
+    },
   ],
 };

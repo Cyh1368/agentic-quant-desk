@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>quant-desk</title>
+<style>
+  :root {
+    --surface-1: #fcfcfb; --page: #f9f9f7;
+    --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+    --grid: #e1e0d9; --baseline: #c3c2b7; --border: rgba(11,11,11,0.10);
+    --btc: #2a78d6; --eth: #1baf7a;
+    --good: #0ca30c; --warning: #fab219; --serious: #ec835a; --critical: #d03b3b;
+    --pos-text: #006300; --neg-text: #a52f2f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19; --page: #0d0d0d;
+      --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+      --grid: #2c2c2a; --baseline: #383835; --border: rgba(255,255,255,0.10);
+      --btc: #3987e5; --eth: #199e70;
+      --pos-text: #0ca30c; --neg-text: #e66767;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--page); color: var(--ink);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header, nav, main { max-width: 1200px; margin-left: auto; margin-right: auto; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 16px 24px 0; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; }
+  nav { display: flex; gap: 4px; padding: 12px 24px; }
+  nav button { border: 1px solid var(--border); background: var(--surface-1); color: var(--ink-2);
+               padding: 6px 14px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 13px; }
+  nav button.active { color: var(--ink); font-weight: 600; border-color: var(--baseline); }
+  main { padding: 0 24px 48px; }
+  section.card { background: var(--surface-1); border: 1px solid var(--border);
+                 border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  h2 { font-size: 13px; margin: 0 0 10px; color: var(--ink-2); text-transform: uppercase;
+       letter-spacing: .04em; font-weight: 600; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: 12px; }
+  .tile .v { font-size: 22px; margin-top: 2px; }
+  .tile .d { font-size: 12px; color: var(--ink-2); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px;
+       border-bottom: 1px solid var(--grid); padding: 4px 10px 4px 0; }
+  td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--grid);
+       font-variant-numeric: tabular-nums; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  .num { text-align: right; }  th.num { text-align: right; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+          border: 1px solid var(--border); }
+  .pill.long, .pill.buy, .pill.approve, .pill.FILLED, .pill.positive { color: var(--pos-text); }
+  .pill.short, .pill.sell, .pill.reject, .pill.negative { color: var(--neg-text); }
+  .pill.flat, .pill.neutral { color: var(--ink-2); }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filters button { border: 1px solid var(--border); background: transparent; color: var(--ink-2);
+                    padding: 4px 12px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 12px; }
+  .filters button.on { border-color: var(--baseline); color: var(--ink); font-weight: 600; }
+  .sent-cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: start; }
+  @media (max-width: 900px) { .sent-cols { grid-template-columns: 1fr; } }
+  .sent-col { border: 1px solid var(--grid); border-radius: 8px; padding: 8px 10px;
+              max-height: 75vh; overflow-y: auto; }
+  .col-head { position: sticky; top: -8px; background: var(--surface-1); padding: 6px 0;
+              display: flex; gap: 8px; align-items: center; font-weight: 600;
+              border-bottom: 1px solid var(--grid); z-index: 1; }
+  .col-head span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .tweet { display: block; text-decoration: none; color: inherit; padding: 10px 4px;
+           border-bottom: 1px solid var(--grid); border-radius: 6px; }
+  .tweet:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+  .tweet .meta { color: var(--muted); font-size: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .tweet .txt { margin: 3px 0 0; white-space: pre-wrap; word-break: break-word; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--ink-2); margin-bottom: 6px; }
+  .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  svg text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  .tip { position: fixed; pointer-events: none; background: var(--surface-1); border: 1px solid var(--baseline);
+         border-radius: 6px; padding: 6px 9px; font-size: 12px; display: none; z-index: 10;
+         box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+  .empty { color: var(--muted); padding: 8px 0; }
+  a { color: var(--btc); }
+</style>
+</head>
+<body>
+<header>
+  <h1>quant-desk</h1>
+  <span class="sub" id="asof">loading…</span>
+</header>
+<nav>
+  <button data-tab="overview" class="active">Overview</button>
+  <button data-tab="sentiment">Sentiment</button>
+  <button data-tab="history">History</button>
+</nav>
+<main>
+  <div id="tab-overview"></div>
+  <div id="tab-sentiment" style="display:none"></div>
+  <div id="tab-history" style="display:none"></div>
+</main>
+<div class="tip" id="tip"></div>
+<script>
+const $ = (s, el=document) => el.querySelector(s);
+const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (x, d=4) => x == null ? "–" : (typeof x === "number" ? x.toFixed(d).replace(/\.?0+$/, m => m.includes(".") ? "" : m) : esc(x));
+const ts = t => t ? esc(t.replace("T"," ").slice(0,16)) + "Z" : "–";
+const pill = v => `<span class="pill ${esc(v)}">${esc(v ?? "–")}</span>`;
+
+function showTab(name) {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("active", x.dataset.tab === name));
+  ["overview","sentiment","history"].forEach(t => $("#tab-"+t).style.display = t === name ? "" : "none");
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => { location.hash = b.dataset.tab; showTab(b.dataset.tab); });
+if (["#sentiment","#history"].includes(location.hash)) showTab(location.hash.slice(1));
+
+function tbl(cols, rows, render) {
+  if (!rows?.length) return '<div class="empty">no rows</div>';
+  return `<div style="overflow-x:auto"><table><tr>${cols.map(c => `<th class="${c.num?'num':''}">${c.h}</th>`).join("")}</tr>` +
+    rows.map(r => `<tr>${render(r).map((v,i) => `<td class="${cols[i].num?'num':''}">${v}</td>`).join("")}</tr>`).join("") + "</table></div>";
+}
+
+async function loadOverview() {
+  const d = await (await fetch("/api/overview")).json();
+  $("#asof").textContent = "latest cycle " + (d.market_generated_at ? ts(d.market_generated_at) : "unknown") +
+    " · LLM spend this month $" + (d.llm_cost_month_usd ?? 0).toFixed(2);
+  const mf = d.market_features || {}, sf = d.sentiment_features || {};
+  const tile = (k, v, dd="") => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="d">${dd}</div></div>`;
+  const pct = x => x == null ? "–" : (x*100).toFixed(2) + "%";
+  let h = '<div class="tiles">';
+  for (const a of ["btc","eth"]) {
+    h += tile(a.toUpperCase() + " 24h return", pct(mf[`${a}_ret_24h@v1`]),
+              "7d " + pct(mf[`${a}_ret_7d@v1`]) + " · trend " + esc(mf[`${a}_trend_state@v1`] ?? "–"));
+    const sl = (d.sentiment_live || {})[a.toUpperCase()] || {};
+    const f2 = x => x == null ? "–" : x.toFixed(2);
+    h += tile(a.toUpperCase() + " sentiment 1h", f2(sl.mean_1h) + " / " + f2(sl.weighted_1h),
+              "24h " + f2(sl.mean_24h) + " / " + f2(sl.weighted_24h) +
+              " (plain / follower-wtd) · " + (sl.n_24h ?? 0) + " tw/24h");
+  }
+  h += "</div>";
+
+  if (d.halt) h += `<section class="card"><h2>Halt state</h2><b>${esc(d.halt.state)}</b> — ${esc(d.halt.reason || "")}</section>`;
+
+  h += `<section class="card"><h2>Latest advisor signals</h2>` +
+    tbl([{h:"advisor"},{h:"inst"},{h:"action"},{h:"score",num:1},{h:"p+",num:1},{h:"generated"}],
+        [...(d.forecasts||[]), ...(d.research_forecasts||[]).map(f => ({...f, advisor_id: f.advisor_id + " (research)"}))],
+        f => [esc(f.advisor_id), esc(f.instrument_id), pill(f.action), fmt(f.raw_score,3), fmt(f.p_plus,3), ts(f.generated_at)]) + "</section>";
+
+  h += `<section class="card"><h2>Positions (shadow ledger)</h2>` +
+    tbl([{h:"inst"},{h:"qty",num:1},{h:"avg price",num:1},{h:"updated"}],
+        d.positions, p => [esc(p.instrument_id), fmt(+p.quantity,6), fmt(+p.avg_price,2), ts(p.updated_at)]) + "</section>";
+
+  h += `<section class="card"><h2>Recent intents & risk verdicts</h2>` +
+    tbl([{h:"created"},{h:"inst"},{h:"side"},{h:"effect"},{h:"qty",num:1},{h:"limit",num:1},{h:"stop",num:1},{h:"state"}],
+        d.intents, i => [ts(i.created_at), esc(i.instrument_id), pill(i.side), esc(i.effect), fmt(+i.quantity,6),
+                         fmt(+i.limit_price,2), i.stop_price ? (+i.stop_price).toFixed(2) : "–", esc(i.queue_state)]) +
+    "<div style='height:10px'></div>" +
+    tbl([{h:"evaluated"},{h:"verdict"},{h:"reasons"}], d.risk_verdicts,
+        v => [ts(v.evaluated_at), pill(v.verdict), esc(Array.isArray(v.reasons) ? v.reasons.join("; ") : v.reasons ?? "")]) + "</section>";
+
+  h += `<section class="card"><h2>Recent orders & fills</h2>` +
+    tbl([{h:"created"},{h:"inst"},{h:"side"},{h:"qty",num:1},{h:"limit",num:1},{h:"state"}],
+        d.orders, o => [ts(o.created_at), esc(o.instrument_id), pill(o.side), fmt(+o.quantity,6), fmt(+o.limit_price,2), pill(o.state)]) +
+    "<div style='height:10px'></div>" +
+    tbl([{h:"filled"},{h:"inst"},{h:"qty",num:1},{h:"price",num:1}],
+        d.fills, f => [ts(f.filled_at), esc(f.instrument_id), fmt(+f.quantity,6), fmt(+f.price,2)]) + "</section>";
+
+  $("#tab-overview").innerHTML = h;
+}
+
+const state = { asset: "", hours: 24 };
+const popularity = t => (t.likes ?? 0) + 2 * (t.retweets ?? 0) + 0.01 * (t.views ?? 0);
+async function loadTweets() {
+  const q = new URLSearchParams({asset: state.asset, hours: state.hours, limit: 2000});
+  const d = await (await fetch("/api/tweets?" + q)).json();
+  const chip = (group, val, txt) =>
+    `<button class="${state[group] === val ? "on" : ""}" data-group="${group}" data-val="${esc(String(val))}">${txt}</button>`;
+  let h = `<section class="card"><h2>Tweets (${d.total}) — sorted by popularity</h2><div class="filters">` +
+    chip("asset","","All") + chip("asset","BTC","BTC") + chip("asset","ETH","ETH") +
+    `<span style="width:12px"></span>` +
+    chip("hours",24,"24h") + chip("hours",72,"3d") + chip("hours",168,"7d") + chip("hours",720,"30d") + `</div>`;
+  const render = t =>
+    `<a class="tweet" href="${esc(t.url)}" target="_blank" rel="noopener">
+       <div class="meta"><b>@${esc(t.author_handle)}</b>
+         <span>${ts(t.event_time)}</span><span>score ${t.sentiment?.toFixed(2)}</span>
+         <span>${esc((t.assets||[]).join(", "))}</span>
+         <span>♥ ${t.likes ?? 0} · ⇄ ${t.retweets ?? 0} · 👁 ${t.views ?? 0}${t.is_retweet ? " · RT" : ""}</span></div>
+       <div class="txt">${esc(t.text)}</div></a>`;
+  h += `<div class="sent-cols">` +
+    ["positive","neutral","negative"].map(label => {
+      const col = (d.tweets||[]).filter(t => t.label === label)
+        .sort((a,b) => popularity(b) - popularity(a));
+      return `<div class="sent-col"><div class="col-head">${pill(label)} <span>${col.length}</span></div>` +
+        (col.map(render).join("") || '<div class="empty">none in window</div>') + `</div>`;
+    }).join("") + `</div>`;
+  $("#tab-sentiment").innerHTML = h + "</section>";
+  $("#tab-sentiment .filters").onclick = e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    const g = b.dataset.group;
+    state[g] = g === "hours" ? +b.dataset.val : b.dataset.val;
+    loadTweets();
+  };
+}
+
+function lineChart(series, styles) {
+  // series: {name: [[iso, value, n], ...]}
+  const W = 1100, H = 260, L = 40, R = 12, T = 14, B = 28;
+  const all = Object.values(series).flat();
+  if (!all.length) return '<div class="empty">no data</div>';
+  const xs = all.map(p => Date.parse(p[0]+"Z")), x0 = Math.min(...xs), x1 = Math.max(...xs) || x0+1;
+  const y0 = -1, y1 = 1;
+  const X = t => L + (W-L-R) * (t - x0) / Math.max(1, x1 - x0);
+  const Y = v => T + (H-T-B) * (1 - (v - y0) / (y1 - y0));
+  let g = "";
+  for (const v of [-1,-0.5,0,0.5,1])
+    g += `<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)" stroke-width="${v===0?1.5:1}"/>` +
+         `<text x="${L-6}" y="${Y(v)+4}" text-anchor="end">${v}</text>`;
+  const nt = 6;
+  for (let i = 0; i <= nt; i++) {
+    const t = x0 + (x1-x0)*i/nt;
+    g += `<text x="${X(t)}" y="${H-8}" text-anchor="middle">${new Date(t).toISOString().slice(5,16).replace("T"," ")}</text>`;
+  }
+  const pts = [];
+  for (const [name, data] of Object.entries(series)) {
+    const st = styles[name];
+    const path = data.map((p,i) => `${i?"L":"M"}${X(Date.parse(p[0]+"Z")).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+    g += `<path d="${path}" fill="none" stroke="${st.color}" stroke-width="2" stroke-linejoin="round"${st.dash ? ' stroke-dasharray="6 4"' : ""}/>`;
+    data.forEach(p => pts.push({x: X(Date.parse(p[0]+"Z")), y: Y(p[1]), name, v: p[1], n: p[2], t: p[0]}));
+  }
+  const legend = Object.keys(series).map(n =>
+    `<span><span class="sw" style="background:${styles[n].dash
+       ? `repeating-linear-gradient(90deg, ${styles[n].color} 0 6px, transparent 6px 9px)`
+       : styles[n].color}"></span>${esc(n)}</span>`).join("");
+  const id = "c" + Math.random().toString(36).slice(2,8);
+  setTimeout(() => {
+    const svg = document.getElementById(id), tip = $("#tip");
+    if (!svg) return;
+    svg.onmousemove = e => {
+      const r = svg.getBoundingClientRect();
+      const mx = (e.clientX - r.left) * W / r.width, my = (e.clientY - r.top) * H / r.height;
+      let best = null, bd = 1e9;
+      for (const p of pts) { const d = (p.x-mx)**2 + (p.y-my)**2; if (d < bd) { bd = d; best = p; } }
+      if (best && bd < 900) {
+        tip.style.display = "block"; tip.style.left = (e.clientX+14)+"px"; tip.style.top = (e.clientY+10)+"px";
+        tip.innerHTML = `<b>${esc(best.name)}</b> ${ts(best.t)}<br>mean sentiment ${best.v.toFixed(3)} · ${best.n} tweets`;
+      } else tip.style.display = "none";
+    };
+    svg.onmouseleave = () => $("#tip").style.display = "none";
+  }, 0);
+  return `<div class="legend">${legend}</div>
+    <svg id="${id}" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">${g}</svg>`;
+}
+
+async function loadHistory() {
+  const d = await (await fetch("/api/history?days=30")).json();
+  const series = {};
+  for (const r of d.sentiment_hourly || []) {
+    if (r.mean_sentiment != null)
+      (series[r.asset] = series[r.asset] || []).push([r.hour, r.mean_sentiment, r.n]);
+    if (r.weighted_sentiment != null) {
+      const k = r.asset + " follower-wtd";
+      (series[k] = series[k] || []).push([r.hour, r.weighted_sentiment, r.n]);
+    }
+  }
+  let h = `<section class="card"><h2>Hourly tweet sentiment (30d) — plain vs follower-weighted</h2>` +
+    lineChart(series, {
+      "BTC": {color: "var(--btc)"}, "BTC follower-wtd": {color: "var(--btc)", dash: true},
+      "ETH": {color: "var(--eth)"}, "ETH follower-wtd": {color: "var(--eth)", dash: true},
+    }) + "</section>";
+
+  h += `<section class="card"><h2>Forecast history</h2>` +
+    tbl([{h:"generated"},{h:"advisor"},{h:"inst"},{h:"action"},{h:"score",num:1},{h:"p+",num:1}],
+        [...(d.forecasts||[])].reverse().slice(0,200),
+        f => [ts(f.generated_at), esc(f.advisor_id), esc(f.instrument_id), pill(f.action), fmt(f.raw_score,3), fmt(f.p_plus,3)]) + "</section>";
+
+  h += `<section class="card"><h2>Order history</h2>` +
+    tbl([{h:"created"},{h:"inst"},{h:"side"},{h:"qty",num:1},{h:"limit",num:1},{h:"state"}],
+        d.orders, o => [ts(o.created_at), esc(o.instrument_id), pill(o.side), fmt(+o.quantity,6), fmt(+o.limit_price,2), pill(o.state)]) + "</section>";
+
+  h += `<section class="card"><h2>Fill history</h2>` +
+    tbl([{h:"filled"},{h:"inst"},{h:"side"},{h:"qty",num:1},{h:"price",num:1}],
+        d.fills, f => [ts(f.filled_at), esc(f.instrument_id), pill(f.side), fmt(+f.quantity,6), fmt(+f.price,2)]) + "</section>";
+
+  $("#tab-history").innerHTML = h;
+}
+
+async function refresh() { await Promise.all([loadOverview(), loadTweets(), loadHistory()]); }
+refresh();
+setInterval(refresh, 120000);
+</script>
+</body>
+</html>
