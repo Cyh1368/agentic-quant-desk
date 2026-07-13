@@ -1,21 +1,24 @@
 # agentic-quant-desk
 
-An auditable, deterministic quant platform with experimental LLM forecasters (v1 — shadow mode)
+An auditable, deterministic quant platform with experimental LLM forecasters,
+currently live on Hyperliquid **testnet**.
 
 Built per `agentic-quant-desk-plan-v2.md`. **No LLM sits in the mandatory path for
 closing, reducing, cancelling, reconciling, or protecting a position.**
 
-## v1 scope
-- BTC + ETH only, Hyperliquid market data, **shadow execution only** — no
-  trading credential exists in this codebase yet (Gate C prerequisite).
-- One deterministic baseline advisor (vol-scaled TS momentum) + one LLM
-  advisor (`crypto_trend_llm_v1`, Claude Haiku via OpenRouter) under a
-  pre-registered research contract, scored prospectively, with **zero order
-  influence** until Gate D.
+## Current status
+- BTC + ETH, Hyperliquid, running 6x/day on a scheduled host (PM2).
+- `desk.mode: live` on `network: testnet` — idempotent order submission,
+  venue price rounding, stop attach with flatten-on-failure, and
+  venue-truth reconciliation + watchdog are in place. Mainnet stays
+  hard-blocked in code until Gate C sign-off.
+- Deterministic baseline advisor (vol-scaled TS momentum), LLM trend
+  advisor (`crypto_trend_llm_v1`, Claude Haiku via OpenRouter), and a
+  Twitter sentiment advisor now all contribute at a provisional 0.3
+  trading weight, promoted from shadow-only after prospective scoring.
 - Decision trail and P0 alerts posted to Discord via webhook.
 - `desk.mode: dry | live` in `config/desk.yaml` (or `DESK_MODE` env) is the
-  trading switch; `live` refuses to start until Gate C is passed and a live
-  execution adapter exists.
+  trading switch; mainnet `live` refuses to start until Gate C is passed.
 
 ## Layout
 ```
@@ -23,10 +26,10 @@ quantdesk/
   common/     schemas (Pydantic, Decimal money), config loader
   data/       immutable raw landing zone, Hyperliquid + Coinbase reference, snapshots
   features/   deterministic versioned feature computation
-  advisors/   ts_momentum_baseline (deterministic), crypto_trend_llm (OpenRouter)
+  advisors/   ts_momentum_baseline (deterministic), crypto_trend_llm (OpenRouter), sentiment (Twitter)
   portfolio/  calibration → reliability weighting → dedup → ERC sizing → intents
   risk/       hard risk engine, stress scenarios, halt state machine
-  execution/  shadow fill simulator, order state machine, protection watchdog
+  execution/  shadow fill simulator + live testnet adapter, order state machine, protection watchdog
   ledger/     single-writer SQLite (WAL), durable intent queue, cost log
   scoring/    prospective forecast scoring, weekly report
 config/       desk.yaml (limits, budget), research contracts
@@ -42,7 +45,7 @@ pytest
 
 ## Run
 ```bash
-python -m quantdesk            # one full shadow decision cycle
+python -m quantdesk            # one full decision cycle (dry or live per config/env)
 python -m quantdesk.data       # data-pipeline smoke fetch
 ```
 
@@ -54,8 +57,9 @@ python -m quantdesk.data       # data-pipeline smoke fetch
 
 ## Governance gates (do not skip)
 Phase 0 items in the plan — venue admission checklist from the execution
-host, tax review, capital/threat model — are prerequisites for any live
-trading. `desk.mode: live` is refused at startup in v1.
+host, tax review, capital/threat model — are prerequisites for mainnet
+trading. `desk.mode: live` on `network: mainnet` is refused at startup
+until Gate C is passed.
 
 ---
 
