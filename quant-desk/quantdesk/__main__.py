@@ -124,10 +124,16 @@ def _load_sentiment_forecasts(
                 notes.append(f"sentiment {coin}: abstain/flat — no signal")
                 continue
             prob = d.get("probability_positive")
-            excess = d.get("expected_excess_return_bps")
-            if prob is None or excess is None:
-                notes.append(f"sentiment {coin}: missing p+/excess — ignored")
+            if prob is None:
+                notes.append(f"sentiment {coin}: missing p+ — ignored")
                 continue
+            excess = d.get("expected_excess_return_bps")
+            if excess is None:
+                # Advisor emits probability only; derive magnitude with the
+                # same convention the engine's calibration uses (100bps base).
+                excess = (float(prob) - 0.5) * 2 * 100.0
+                if d["direction"] == "short":
+                    excess = -abs(excess)
             confidence = float(d.get("confidence") or 0.0)
             direction = d["direction"]
             signals.append(ForecastSignal(
